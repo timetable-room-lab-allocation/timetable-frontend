@@ -96,13 +96,14 @@ function makeStaff(): StaffMember[] {
     availability[DAYS[(i + 1) % DAYS.length]][0] = 'preferred'
     availability[DAYS[(i + 1) % DAYS.length]][1] = 'preferred'
     return {
-      id: `staff-${String(i + 1).padStart(2, '0')}`,
-      code: `ST-${String(i + 1).padStart(2, '0')}`,
-      name: `${first} ${last}`,
-      title: i % 3 === 0 ? 'Prof.' : i % 3 === 1 ? 'Dr.' : 'Eng.',
-      department: dept,
-      availability,
-    }
+  id: `staff-${String(i + 1).padStart(2, '0')}`,
+  user_id: null,
+  code: `ST-${String(i + 1).padStart(2, '0')}`,
+  name: `${first} ${last}`,
+  title: i % 3 === 0 ? 'Prof.' : i % 3 === 1 ? 'Dr.' : 'Eng.',
+  department: dept,
+  availability,
+}
   })
 }
 

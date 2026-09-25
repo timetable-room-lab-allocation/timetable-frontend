@@ -190,7 +190,7 @@ export default function AppShell({
   const isAdmin = user.role === 'Admin'
   const isCoordinator = user.role === 'Coordinator'
   const isLecturer = user.role === 'Lecturer'
-  const isStudent = user.role === 'Student'
+
 
   const nav = isAdmin
     ? ADMIN_NAV
