@@ -3,14 +3,10 @@
 
    Lecturer Management + Weekly Availability
 
-   Features:
-   - View all teaching staff
-   - Search lecturers
-   - Add / Edit / Delete lecturer
-   - Availability summary per lecturer
-   - Weekly Allowed / Preferred / Blocked matrix
-   - Click a cell to cycle:
-       Allowed → Preferred → Blocked → Allowed
+   Role behavior:
+   - Admin       → View / Add / Edit / Delete all lecturers
+   - Coordinator → View / Add / Edit / Delete all lecturers
+   - Lecturer    → View and edit own availability only
    ============================================================ */
 
 import {
@@ -20,6 +16,7 @@ import {
   type FormEvent,
   type SetStateAction,
 } from 'react'
+
 import {
   Ban,
   Check,
@@ -34,9 +31,11 @@ import {
   Users,
   X,
 } from 'lucide-react'
+
 import { useQueryClient } from '@tanstack/react-query'
 
 import { cn } from '@/lib/utils'
+
 import {
   createLecturer,
   dbKeys,
@@ -46,7 +45,9 @@ import {
   useSetAvailability,
   type CreateLecturerInput,
 } from '@/api/client'
+
 import { useSchedulerStore } from '@/store/schedulerStore'
+
 import {
   DAYS,
   DAY_LABELS,
@@ -54,9 +55,16 @@ import {
   SLOTS,
   type Availability,
 } from '@/types/sch'
+
+import { getAuth } from '@/auth/auth'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import {
+  Card,
+  CardContent,
+} from '@/components/ui/card'
+
 import {
   Select,
   SelectContent,
@@ -64,18 +72,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+
 import { EmptyState } from '@/components/EmptyState'
 
-const NEXT: Record<Availability, Availability> = {
+const NEXT: Record<
+  Availability,
+  Availability
+> = {
   allowed: 'preferred',
   preferred: 'blocked',
   blocked: 'allowed',
 }
 
-const CELL_STYLE: Record<Availability, string> = {
+const CELL_STYLE: Record<
+  Availability,
+  string
+> = {
   allowed: 'bg-card hover:bg-accent',
+
   preferred:
     'bg-emerald-100 text-emerald-900 hover:bg-emerald-200',
+
   blocked:
     'bg-red-100 text-red-900 hover:bg-red-200',
 }
@@ -88,79 +105,174 @@ const EMPTY_FORM = {
   user_id: '',
 }
 
-type LecturerFormState = typeof EMPTY_FORM
+type LecturerFormState =
+  typeof EMPTY_FORM
 
 export default function AvailabilityMatrix() {
   const { data: dataset } = useDataset()
-  const setAvailability = useSetAvailability()
-  const queryClient = useQueryClient()
 
-  const role = useSchedulerStore((state) => state.role)
+  const setAvailability =
+    useSetAvailability()
+
+  const queryClient =
+    useQueryClient()
+
+  const role = useSchedulerStore(
+    (state) => state.role,
+  )
+
+  /*
+   * Get the currently logged-in user.
+   */
+  const authUser = getAuth()
+
+  /*
+   * Application roles.
+   */
+  const isAdmin = role === 'admin'
+  const isCoordinator =
+    role === 'coordinator'
+  const isLecturer = role === 'staff'
+
+  /*
+   * Admin + Coordinator can manage
+   * lecturers.
+   */
+  const canManageStaff =
+    isAdmin || isCoordinator
+
+  /*
+   * Everyone who reaches this page
+   * except Student can edit availability.
+   */
   const editable =
-    role === 'admin' || role === 'coordinator'
+    isAdmin ||
+    isCoordinator ||
+    isLecturer
 
-  const [staffId, setStaffId] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [showAllStaff, setShowAllStaff] = useState(true)
+  const [staffId, setStaffId] =
+    useState<string | null>(null)
 
-  const [formOpen, setFormOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [search, setSearch] =
+    useState('')
+
+  const [showAllStaff, setShowAllStaff] =
+    useState(true)
+
+  const [formOpen, setFormOpen] =
+    useState(false)
+
+  const [editingId, setEditingId] =
+    useState<string | null>(null)
+
   const [form, setForm] =
-    useState<LecturerFormState>(EMPTY_FORM)
+    useState<LecturerFormState>(
+      EMPTY_FORM,
+    )
 
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const [saving, setSaving] =
+    useState(false)
 
-  const staff = dataset?.staff ?? []
+  const [deleting, setDeleting] =
+    useState(false)
 
-  const filteredStaff = useMemo(() => {
-    const query = search.trim().toLowerCase()
+  /*
+   * All lecturers coming from the dataset.
+   */
+  const allStaff =
+    dataset?.staff ?? []
 
-    if (!query) return staff
+  /*
+   * IMPORTANT:
+   *
+   * Admin / Coordinator:
+   *   → see all lecturers
+   *
+   * Lecturer:
+   *   → see only the lecturer whose
+   *     user_id matches the logged-in
+   *     user's id.
+   */
+  const staff = useMemo(() => {
+  if (!isLecturer || !authUser) {
+    return allStaff
+  }
 
-    return staff.filter((member) => {
-      const values = [
-        member.name,
-        member.code,
-        member.title,
-        member.department,
-      ]
+  return allStaff.filter(
+    (member) => member.user_id === authUser.id,
+  )
+}, [allStaff, isLecturer, authUser])
 
-      return values.some((value) =>
-        String(value ?? '')
-          .toLowerCase()
-          .includes(query),
-      )
-    })
-  }, [staff, search])
+  /*
+   * Search only inside the lecturers
+   * the current user is allowed to see.
+   */
+  const filteredStaff =
+    useMemo(() => {
+      const query =
+        search.trim().toLowerCase()
 
+      if (!query) {
+        return staff
+      }
+
+      return staff.filter((member) => {
+        const values = [
+          member.name,
+          member.code,
+          member.title,
+          member.department,
+        ]
+
+        return values.some((value) =>
+          String(value ?? '')
+            .toLowerCase()
+            .includes(query),
+        )
+      })
+    }, [staff, search])
+
+  /*
+   * Selected lecturer.
+   *
+   * For Lecturer:
+   *   this will always be their own lecturer.
+   */
   const active =
-    staff.find((member) => member.id === staffId) ??
-    staff[0]
+    staff.find(
+      (member) =>
+        member.id === staffId,
+    ) ?? staff[0]
 
   function getAvailabilityStats(
     lecturer: (typeof staff)[number],
   ) {
     const values = DAYS.flatMap(
-      (day) => lecturer.availability[day],
+      (day) =>
+        lecturer.availability[day],
     )
 
     return {
       allowed: values.filter(
-        (value) => value === 'allowed',
+        (value) =>
+          value === 'allowed',
       ).length,
 
       preferred: values.filter(
-        (value) => value === 'preferred',
+        (value) =>
+          value === 'preferred',
       ).length,
 
       blocked: values.filter(
-        (value) => value === 'blocked',
+        (value) =>
+          value === 'blocked',
       ).length,
     }
   }
 
-  function selectLecturer(id: string) {
+  function selectLecturer(
+    id: string,
+  ) {
     setStaffId(id)
     setShowAllStaff(false)
   }
@@ -180,7 +292,8 @@ export default function AvailabilityMatrix() {
       name: lecturer.name ?? '',
       code: lecturer.code ?? '',
       title: lecturer.title ?? '',
-      department: lecturer.department ?? '',
+      department:
+        lecturer.department ?? '',
       user_id: '',
     })
 
@@ -193,38 +306,69 @@ export default function AvailabilityMatrix() {
     event.preventDefault()
 
     if (!form.name.trim()) {
-      window.alert('Lecturer name is required.')
+      window.alert(
+        'Lecturer name is required.',
+      )
+
       return
     }
 
     setSaving(true)
 
     try {
-      const payload: CreateLecturerInput = {
-        name: form.name.trim(),
-        code: form.code.trim() || undefined,
-        title: form.title.trim() || undefined,
-        department:
-          form.department.trim() || undefined,
-        ...(form.user_id.trim()
-          ? { user_id: Number(form.user_id) }
-          : {}),
-      }
+      const payload: CreateLecturerInput =
+        {
+          name: form.name.trim(),
+
+          code:
+            form.code.trim() ||
+            undefined,
+
+          title:
+            form.title.trim() ||
+            undefined,
+
+          department:
+            form.department.trim() ||
+            undefined,
+
+          ...(form.user_id.trim()
+            ? {
+                user_id:
+                  Number(
+                    form.user_id,
+                  ),
+              }
+            : {}),
+        }
 
       if (editingId) {
-        await updateLecturer(editingId, payload)
+        await updateLecturer(
+          editingId,
+          payload,
+        )
       } else {
         const created =
-          await createLecturer(payload)
+          await createLecturer(
+            payload,
+          )
 
-        if (created?.id !== undefined) {
-          setStaffId(String(created.id))
+        if (
+          created?.id !==
+          undefined
+        ) {
+          setStaffId(
+            String(created.id),
+          )
         }
       }
 
-      await queryClient.invalidateQueries({
-        queryKey: dbKeys.dataset(),
-      })
+      await queryClient.invalidateQueries(
+        {
+          queryKey:
+            dbKeys.dataset(),
+        },
+      )
 
       setFormOpen(false)
       setEditingId(null)
@@ -243,22 +387,32 @@ export default function AvailabilityMatrix() {
   async function handleDelete(
     lecturer: (typeof staff)[number],
   ) {
-    const confirmed = window.confirm(
-      `Delete lecturer "${lecturer.name}"?\n\nThis action cannot be undone.`,
-    )
+    const confirmed =
+      window.confirm(
+        `Delete lecturer "${lecturer.name}"?\n\nThis action cannot be undone.`,
+      )
 
-    if (!confirmed) return
+    if (!confirmed) {
+      return
+    }
 
     setDeleting(true)
 
     try {
-      await deleteLecturer(lecturer.id)
+      await deleteLecturer(
+        lecturer.id,
+      )
 
-      await queryClient.invalidateQueries({
-        queryKey: dbKeys.dataset(),
-      })
+      await queryClient.invalidateQueries(
+        {
+          queryKey:
+            dbKeys.dataset(),
+        },
+      )
 
-      if (staffId === lecturer.id) {
+      if (
+        staffId === lecturer.id
+      ) {
         setStaffId(null)
         setShowAllStaff(true)
       }
@@ -273,6 +427,9 @@ export default function AvailabilityMatrix() {
     }
   }
 
+  /*
+   * Dataset loading.
+   */
   if (!dataset) {
     return (
       <EmptyState
@@ -283,8 +440,40 @@ export default function AvailabilityMatrix() {
     )
   }
 
+  /*
+   * Lecturer account exists,
+   * but no lecturer record is linked
+   * to this user.
+   */
+  if (
+    isLecturer &&
+    authUser &&
+    staff.length === 0
+  ) {
+    return (
+      <div className="flex flex-col gap-5">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">
+            My Availability
+          </h1>
+
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage your weekly availability preferences.
+          </p>
+        </div>
+
+        <EmptyState
+          title="Lecturer profile not linked"
+          description="Your account is not linked to a lecturer profile yet. Please contact the coordinator or administrator."
+          icon={UserRound}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-5">
+
       {/* ======================================================
           HEADER
           ====================================================== */}
@@ -292,17 +481,22 @@ export default function AvailabilityMatrix() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
-            Lecturer Availability
+            {isLecturer
+              ? 'My Availability'
+              : 'Lecturer Availability'}
           </h1>
 
           <p className="mt-1 text-sm text-muted-foreground">
-            Manage teaching staff and their weekly
-            availability preferences.
+            {isLecturer
+              ? 'View and manage your weekly availability preferences.'
+              : 'Manage teaching staff and their weekly availability preferences.'}
           </p>
         </div>
 
-        {editable && (
-          <Button onClick={openAddForm}>
+        {canManageStaff && (
+          <Button
+            onClick={openAddForm}
+          >
             <Plus className="mr-2 h-4 w-4" />
             Add Lecturer
           </Button>
@@ -314,11 +508,16 @@ export default function AvailabilityMatrix() {
           ====================================================== */}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+
         <SummaryCard
           icon={Users}
           label="Teaching Staff"
           value={staff.length}
-          description="Total lecturers"
+          description={
+            isLecturer
+              ? 'Your lecturer profile'
+              : 'Total lecturers'
+          }
         />
 
         <SummaryCard
@@ -327,10 +526,16 @@ export default function AvailabilityMatrix() {
           value={staff.reduce(
             (total, lecturer) =>
               total +
-              getAvailabilityStats(lecturer).allowed,
+              getAvailabilityStats(
+                lecturer,
+              ).allowed,
             0,
           )}
-          description="Across all lecturers"
+          description={
+            isLecturer
+              ? 'Your allowed slots'
+              : 'Across all lecturers'
+          }
         />
 
         <SummaryCard
@@ -339,10 +544,16 @@ export default function AvailabilityMatrix() {
           value={staff.reduce(
             (total, lecturer) =>
               total +
-              getAvailabilityStats(lecturer).preferred,
+              getAvailabilityStats(
+                lecturer,
+              ).preferred,
             0,
           )}
-          description="Across all lecturers"
+          description={
+            isLecturer
+              ? 'Your preferred slots'
+              : 'Across all lecturers'
+          }
         />
 
         <SummaryCard
@@ -351,11 +562,18 @@ export default function AvailabilityMatrix() {
           value={staff.reduce(
             (total, lecturer) =>
               total +
-              getAvailabilityStats(lecturer).blocked,
+              getAvailabilityStats(
+                lecturer,
+              ).blocked,
             0,
           )}
-          description="Across all lecturers"
+          description={
+            isLecturer
+              ? 'Your blocked slots'
+              : 'Across all lecturers'
+          }
         />
+
       </div>
 
       {/* ======================================================
@@ -363,35 +581,50 @@ export default function AvailabilityMatrix() {
           ====================================================== */}
 
       <Card>
+
         <div className="border-b p-4">
+
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+
             <div>
               <h2 className="font-semibold">
-                Teaching Staff
+                {isLecturer
+                  ? 'My Profile'
+                  : 'Teaching Staff'}
               </h2>
 
               <p className="text-sm text-muted-foreground">
-                Select a lecturer to manage their
-                availability.
+                {isLecturer
+                  ? 'Your lecturer profile and availability.'
+                  : 'Select a lecturer to manage their availability.'}
               </p>
             </div>
 
-            <div className="relative w-full lg:w-80">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            {!isLecturer && (
+              <div className="relative w-full lg:w-80">
 
-              <input
-                value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
-                }
-                placeholder="Search lecturers..."
-                className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+
+                <input
+                  value={search}
+                  onChange={(event) =>
+                    setSearch(
+                      event.target.value,
+                    )
+                  }
+                  placeholder="Search lecturers..."
+                  className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+
+              </div>
+            )}
+
           </div>
+
         </div>
 
         {staff.length === 0 ? (
+
           <div className="p-6">
             <EmptyState
               title="No teaching staff yet"
@@ -399,8 +632,11 @@ export default function AvailabilityMatrix() {
               icon={UserRound}
             />
           </div>
+
         ) : filteredStaff.length === 0 ? (
+
           <div className="p-8 text-center">
+
             <UserRound className="mx-auto h-10 w-10 text-muted-foreground" />
 
             <p className="mt-3 font-medium">
@@ -410,155 +646,198 @@ export default function AvailabilityMatrix() {
             <p className="mt-1 text-sm text-muted-foreground">
               Try another search term.
             </p>
+
           </div>
+
         ) : (
+
           <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-            {filteredStaff.map((lecturer) => {
-              const stats =
-                getAvailabilityStats(lecturer)
 
-              const selected =
-                active?.id === lecturer.id
+            {filteredStaff.map(
+              (lecturer) => {
 
-              return (
-                <button
-                  key={lecturer.id}
-                  type="button"
-                  onClick={() =>
-                    selectLecturer(lecturer.id)
-                  }
-                  className={cn(
-                    'group relative rounded-xl border p-4 text-left transition-all',
-                    'hover:border-primary/50 hover:shadow-sm',
-                    selected &&
-                      'border-primary bg-primary/[0.03] ring-1 ring-primary/20',
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div
-                        className={cn(
-                          'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
-                          selected
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-muted text-muted-foreground',
-                        )}
-                      >
-                        <UserRound className="h-5 w-5" />
-                      </div>
+                const stats =
+                  getAvailabilityStats(
+                    lecturer,
+                  )
 
-                      <div className="min-w-0">
-                        <p className="truncate font-semibold">
-                          {lecturer.title
-                            ? `${lecturer.title} `
-                            : ''}
-                          {lecturer.name}
-                        </p>
+                const selected =
+                  active?.id ===
+                  lecturer.id
 
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                          {lecturer.code ||
-                            'No lecturer code'}
-                        </p>
-                      </div>
-                    </div>
-
-                    {selected && (
-                      <Badge variant="secondary">
-                        Selected
-                      </Badge>
+                return (
+                  <button
+                    key={lecturer.id}
+                    type="button"
+                    onClick={() =>
+                      selectLecturer(
+                        lecturer.id,
+                      )
+                    }
+                    className={cn(
+                      'group relative rounded-xl border p-4 text-left transition-all',
+                      'hover:border-primary/50 hover:shadow-sm',
+                      selected &&
+                        'border-primary bg-primary/[0.03] ring-1 ring-primary/20',
                     )}
-                  </div>
+                  >
 
-                  <div className="mt-3 space-y-1">
-                    <p className="truncate text-sm">
-                      {lecturer.department ||
-                        'No department assigned'}
-                    </p>
-                  </div>
+                    <div className="flex items-start justify-between gap-3">
 
-                  <div className="mt-4 grid grid-cols-3 gap-2">
-                    <AvailabilityStat
-                      value={stats.allowed}
-                      label="Allowed"
-                      className="bg-muted"
-                    />
+                      <div className="flex min-w-0 items-start gap-3">
 
-                    <AvailabilityStat
-                      value={stats.preferred}
-                      label="Preferred"
-                      className="bg-emerald-50 text-emerald-800"
-                    />
+                        <div
+                          className={cn(
+                            'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
+                            selected
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted text-muted-foreground',
+                          )}
+                        >
+                          <UserRound className="h-5 w-5" />
+                        </div>
 
-                    <AvailabilityStat
-                      value={stats.blocked}
-                      label="Blocked"
-                      className="bg-red-50 text-red-800"
-                    />
-                  </div>
+                        <div className="min-w-0">
 
-                  {editable && (
-                    <div
-                      className="mt-4 flex gap-2"
-                      onClick={(event) =>
-                        event.stopPropagation()
-                      }
-                    >
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() =>
-                          openEditForm(lecturer)
-                        }
-                      >
-                        <Pencil className="mr-2 h-3.5 w-3.5" />
-                        Edit
-                      </Button>
+                          <p className="truncate font-semibold">
+                            {lecturer.title
+                              ? `${lecturer.title} `
+                              : ''}
+                            {lecturer.name}
+                          </p>
 
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="text-red-600 hover:text-red-700"
-                        disabled={deleting}
-                        onClick={() =>
-                          handleDelete(lecturer)
-                        }
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                            {lecturer.code ||
+                              'No lecturer code'}
+                          </p>
+
+                        </div>
+
+                      </div>
+
+                      {selected && (
+                        <Badge variant="secondary">
+                          Selected
+                        </Badge>
+                      )}
+
                     </div>
-                  )}
-                </button>
-              )
-            })}
+
+                    <div className="mt-3 space-y-1">
+
+                      <p className="truncate text-sm">
+                        {lecturer.department ||
+                          'No department assigned'}
+                      </p>
+
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+
+                      <AvailabilityStat
+                        value={stats.allowed}
+                        label="Allowed"
+                        className="bg-muted"
+                      />
+
+                      <AvailabilityStat
+                        value={
+                          stats.preferred
+                        }
+                        label="Preferred"
+                        className="bg-emerald-50 text-emerald-800"
+                      />
+
+                      <AvailabilityStat
+                        value={stats.blocked}
+                        label="Blocked"
+                        className="bg-red-50 text-red-800"
+                      />
+
+                    </div>
+
+                    {canManageStaff && (
+                      <div
+                        className="mt-4 flex gap-2"
+                        onClick={(event) =>
+                          event.stopPropagation()
+                        }
+                      >
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() =>
+                            openEditForm(
+                              lecturer,
+                            )
+                          }
+                        >
+                          <Pencil className="mr-2 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600 hover:text-red-700"
+                          disabled={deleting}
+                          onClick={() =>
+                            handleDelete(
+                              lecturer,
+                            )
+                          }
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+
+                      </div>
+                    )}
+
+                  </button>
+                )
+              },
+            )}
+
           </div>
+
         )}
 
-        {filteredStaff.length > 0 && (
-          <div className="border-t px-4 py-3">
-            <button
-              type="button"
-              onClick={() =>
-                setShowAllStaff((current) => !current)
-              }
-              className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
-            >
-              {showAllStaff ? (
-                <>
-                  <ChevronUp className="h-4 w-4" />
-                  Hide lecturer list
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="h-4 w-4" />
-                  Show lecturer list
-                </>
-              )}
-            </button>
-          </div>
-        )}
+        {!isLecturer &&
+          filteredStaff.length > 0 && (
+            <div className="border-t px-4 py-3">
+
+              <button
+                type="button"
+                onClick={() =>
+                  setShowAllStaff(
+                    (current) =>
+                      !current,
+                  )
+                }
+                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+              >
+
+                {showAllStaff ? (
+                  <>
+                    <ChevronUp className="h-4 w-4" />
+                    Hide lecturer list
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-4 w-4" />
+                    Show lecturer list
+                  </>
+                )}
+
+              </button>
+
+            </div>
+          )}
+
       </Card>
 
       {/* ======================================================
@@ -567,15 +846,21 @@ export default function AvailabilityMatrix() {
 
       {active && (
         <Card>
+
           <div className="border-b p-4">
+
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+
               <div className="flex items-center gap-3">
+
                 <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
                   <UserRound className="h-6 w-6" />
                 </div>
 
                 <div>
+
                   <div className="flex flex-wrap items-center gap-2">
+
                     <h2 className="text-lg font-semibold">
                       {active.title
                         ? `${active.title} `
@@ -588,22 +873,27 @@ export default function AvailabilityMatrix() {
                         {active.code}
                       </Badge>
                     )}
+
                   </div>
 
                   <p className="text-sm text-muted-foreground">
                     {active.department ||
                       'No department assigned'}
                   </p>
+
                 </div>
+
               </div>
 
               <div className="flex flex-wrap gap-2">
+
                 <AvailabilityBadge
                   icon={Check}
                   label="Allowed"
                   value={
-                    getAvailabilityStats(active)
-                      .allowed
+                    getAvailabilityStats(
+                      active,
+                    ).allowed
                   }
                   className="bg-muted"
                 />
@@ -612,8 +902,9 @@ export default function AvailabilityMatrix() {
                   icon={Heart}
                   label="Preferred"
                   value={
-                    getAvailabilityStats(active)
-                      .preferred
+                    getAvailabilityStats(
+                      active,
+                    ).preferred
                   }
                   className="bg-emerald-100 text-emerald-900"
                 />
@@ -622,18 +913,25 @@ export default function AvailabilityMatrix() {
                   icon={Ban}
                   label="Blocked"
                   value={
-                    getAvailabilityStats(active)
-                      .blocked
+                    getAvailabilityStats(
+                      active,
+                    ).blocked
                   }
                   className="bg-red-100 text-red-900"
                 />
+
               </div>
+
             </div>
+
           </div>
 
           <CardContent className="p-4">
+
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
               <div>
+
                 <h3 className="font-semibold">
                   Weekly Availability
                 </h3>
@@ -642,43 +940,61 @@ export default function AvailabilityMatrix() {
                   Click a cell to cycle Allowed → Preferred
                   → Blocked.
                 </p>
+
               </div>
 
-              <Select
-                value={active.id}
-                onValueChange={selectLecturer}
-              >
-                <SelectTrigger
-                  className="w-full sm:w-72"
-                  aria-label="Select lecturer"
+              {canManageStaff && (
+                <Select
+                  value={active.id}
+                  onValueChange={
+                    selectLecturer
+                  }
                 >
-                  <SelectValue />
-                </SelectTrigger>
 
-                <SelectContent>
-                  {staff.map((member) => (
-                    <SelectItem
-                      key={member.id}
-                      value={member.id}
-                    >
-                      {member.title
-                        ? `${member.title} `
-                        : ''}
-                      {member.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <SelectTrigger
+                    className="w-full sm:w-72"
+                    aria-label="Select lecturer"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+
+                  <SelectContent>
+
+                    {staff.map(
+                      (member) => (
+                        <SelectItem
+                          key={
+                            member.id
+                          }
+                          value={
+                            member.id
+                          }
+                        >
+                          {member.title
+                            ? `${member.title} `
+                            : ''}
+                          {member.name}
+                        </SelectItem>
+                      ),
+                    )}
+
+                  </SelectContent>
+
+                </Select>
+              )}
+
             </div>
 
             <div
               className="grid gap-1 overflow-x-auto"
               style={{
-                gridTemplateColumns: `72px repeat(${DAYS.length}, minmax(100px, 1fr))`,
+                gridTemplateColumns:
+                  `72px repeat(${DAYS.length}, minmax(100px, 1fr))`,
               }}
               role="grid"
               aria-label={`Weekly availability for ${active.name}`}
             >
+
               <div />
 
               {DAYS.map((day) => (
@@ -696,16 +1012,20 @@ export default function AvailabilityMatrix() {
                   key={slot}
                   slot={slot}
                   staffId={active.id}
-                  availability={active.availability}
+                  availability={
+                    active.availability
+                  }
                   editable={
                     editable &&
                     !setAvailability.isPending
                   }
                 />
               ))}
+
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2 border-t pt-4">
+
               <LegendItem
                 icon={Check}
                 label="Allowed"
@@ -723,8 +1043,11 @@ export default function AvailabilityMatrix() {
                 label="Blocked"
                 className="bg-red-100 text-red-900"
               />
+
             </div>
+
           </CardContent>
+
         </Card>
       )}
 
@@ -732,16 +1055,20 @@ export default function AvailabilityMatrix() {
           LECTURER FORM
           ====================================================== */}
 
-      {formOpen && (
-        <LecturerForm
-          form={form}
-          setForm={setForm}
-          editingId={editingId}
-          saving={saving}
-          onSubmit={handleSubmit}
-          onClose={() => setFormOpen(false)}
-        />
-      )}
+      {formOpen &&
+        canManageStaff && (
+          <LecturerForm
+            form={form}
+            setForm={setForm}
+            editingId={editingId}
+            saving={saving}
+            onSubmit={handleSubmit}
+            onClose={() =>
+              setFormOpen(false)
+            }
+          />
+        )}
+
     </div>
   )
 }
@@ -763,12 +1090,15 @@ function SummaryCard({
 }) {
   return (
     <Card>
+
       <CardContent className="flex items-center gap-3 p-4">
+
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
           <Icon className="h-5 w-5 text-muted-foreground" />
         </div>
 
         <div>
+
           <p className="text-xs font-medium text-muted-foreground">
             {label}
           </p>
@@ -780,8 +1110,11 @@ function SummaryCard({
           <p className="text-[11px] text-muted-foreground">
             {description}
           </p>
+
         </div>
+
       </CardContent>
+
     </Card>
   )
 }
@@ -806,7 +1139,10 @@ function AvailabilityStat({
         className,
       )}
     >
-      <p className="text-sm font-bold">{value}</p>
+      <p className="text-sm font-bold">
+        {value}
+      </p>
+
       <p className="text-[10px] font-medium uppercase tracking-wide opacity-75">
         {label}
       </p>
@@ -881,17 +1217,25 @@ function LecturerForm({
   onClose,
 }: {
   form: LecturerFormState
-  setForm: Dispatch<SetStateAction<LecturerFormState>>
+  setForm: Dispatch<
+    SetStateAction<LecturerFormState>
+  >
   editingId: string | null
   saving: boolean
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onSubmit: (
+    event: FormEvent<HTMLFormElement>,
+  ) => void
   onClose: () => void
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+
       <Card className="w-full max-w-lg">
+
         <div className="flex items-center justify-between border-b p-4">
+
           <div>
+
             <h2 className="text-lg font-semibold">
               {editingId
                 ? 'Edit Lecturer'
@@ -903,6 +1247,7 @@ function LecturerForm({
                 ? 'Update lecturer information.'
                 : 'Add a new member of the teaching staff.'}
             </p>
+
           </div>
 
           <Button
@@ -914,10 +1259,13 @@ function LecturerForm({
           >
             <X className="h-4 w-4" />
           </Button>
+
         </div>
 
         <form onSubmit={onSubmit}>
+
           <CardContent className="space-y-4 p-4">
+
             <FormField
               label="Name *"
               value={form.name}
@@ -932,6 +1280,7 @@ function LecturerForm({
             />
 
             <div className="grid gap-4 sm:grid-cols-2">
+
               <FormField
                 label="Code"
                 value={form.code}
@@ -955,6 +1304,7 @@ function LecturerForm({
                   }))
                 }
               />
+
             </div>
 
             <FormField
@@ -985,9 +1335,11 @@ function LecturerForm({
             <p className="-mt-2 text-xs text-muted-foreground">
               User ID is optional and can be left empty.
             </p>
+
           </CardContent>
 
           <div className="flex justify-end gap-2 border-t p-4">
+
             <Button
               type="button"
               variant="outline"
@@ -1007,9 +1359,13 @@ function LecturerForm({
                   ? 'Save Changes'
                   : 'Add Lecturer'}
             </Button>
+
           </div>
+
         </form>
+
       </Card>
+
     </div>
   )
 }
@@ -1035,21 +1391,29 @@ function FormField({
 }) {
   return (
     <div className="space-y-2">
+
       <label className="text-sm font-medium">
         {label}
       </label>
 
       <input
         type={type}
-        min={type === 'number' ? 1 : undefined}
+        min={
+          type === 'number'
+            ? 1
+            : undefined
+        }
         value={value}
         placeholder={placeholder}
         required={required}
         onChange={(event) =>
-          onChange(event.target.value)
+          onChange(
+            event.target.value,
+          )
         }
         className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
       />
+
     </div>
   )
 }
@@ -1072,7 +1436,8 @@ function SlotRow({
   >
   editable: boolean
 }) {
-  const setAvailability = useSetAvailability()
+  const setAvailability =
+    useSetAvailability()
 
   return (
     <>
@@ -1087,7 +1452,9 @@ function SlotRow({
       </div>
 
       {DAYS.map((day) => {
-        const value = availability[day][slot]
+
+        const value =
+          availability[day][slot]
 
         return (
           <button
@@ -1107,15 +1474,18 @@ function SlotRow({
                 day,
                 slot:
                   slot as (typeof SLOTS)[number],
-                value: NEXT[value],
+                value:
+                  NEXT[value],
               })
             }
             className={cn(
               'h-10 rounded-md border text-[10px] font-semibold uppercase tracking-wide transition-colors',
               CELL_STYLE[value],
+
               editable
                 ? 'cursor-pointer'
                 : 'cursor-default',
+
               editable &&
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             )}

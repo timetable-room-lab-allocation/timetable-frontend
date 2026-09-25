@@ -371,18 +371,29 @@ for (const item of availability) {
 }
   void timeslots
 
-  return {
-    id: toId(lecturer.id),
-    code:
-      lecturer.code ??
-      `LEC-${lecturer.id}`,
-    name: lecturer.name,
-    title: lecturer.title ?? '',
-    department:
-      lecturer.department ?? '',
-    availability:
-      availabilityByDay,
-  }
+return {
+  id: toId(lecturer.id),
+
+  user_id:
+    lecturer.user_id == null
+      ? null
+      : Number(lecturer.user_id),
+
+  code:
+    lecturer.code ??
+    `LEC-${lecturer.id}`,
+
+  name: lecturer.name,
+
+  title:
+    lecturer.title ?? '',
+
+  department:
+    lecturer.department ?? '',
+
+  availability:
+    availabilityByDay,
+}
 }
 
 function adaptCourse(

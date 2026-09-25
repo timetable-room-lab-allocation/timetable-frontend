@@ -8,10 +8,14 @@
 
 import { useMemo, useState } from 'react'
 import { Calendar, CalendarDays, Download, List, Printer } from 'lucide-react'
-import { cn, slotLabel, downloadFile } from '@/lib/utils'
-import { buildIcs, upcomingSunday, type IcsEvent } from '@/lib/ics'
-import { useDataset } from '@/api/client'
-import { useSchedulerStore } from '@/store/schedulerStore'
+import { cn, slotLabel, downloadFile } from '../../lib/utils'
+import {
+  buildIcs,
+  upcomingSunday,
+  type IcsEvent,
+} from '../../lib/ics'
+import { useDataset } from '../../api/client'
+import { useSchedulerStore } from '../../store/schedulerStore'
 import {
   DAYS, DAY_LABELS, SLOTS, DAY_START_HOUR,
   type Allocation, type Dataset,

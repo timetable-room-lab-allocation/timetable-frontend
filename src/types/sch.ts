@@ -67,11 +67,11 @@ export type Availability = 'preferred' | 'allowed' | 'blocked'
 
 export interface StaffMember {
   id: string
-  code: string          // e.g. "ST-07"
+  user_id: number | null
+  code: string
   name: string
-  title: string         // e.g. "Dr."
+  title: string
   department: string
-  /** availability[day][slot] */
   availability: Record<Day, Availability[]>
 }
 
