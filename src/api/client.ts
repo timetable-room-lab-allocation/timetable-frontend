@@ -1795,10 +1795,14 @@ export async function fetchSections() {
   >('/sections')
 }
 
+interface CreateSectionResponse {
+  sectionId: number
+}
+
 export async function createSection(
   input: CreateSectionInput,
 ) {
-  return request<BackendSection>(
+  return request<CreateSectionResponse>(
     '/sections',
     {
       method: 'POST',
